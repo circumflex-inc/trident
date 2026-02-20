@@ -19,18 +19,18 @@ interface ProviderConfig {
 const PRESETS: Record<string, Record<string, ProviderConfig>> = {
   default: {
     MELCHIOR:  { provider: "openai",    model: "gpt-5" },
-    BALTHASAR: { provider: "anthropic", model: "claude-sonnet-4-20250514" },
-    CASPER:    { provider: "google",    model: "gemini-2.5-flash" },
+    BALTHASAR: { provider: "anthropic", model: "claude-sonnet-4-6" },
+    CASPER:    { provider: "google",    model: "gemini-3-flash-preview" },
   },
   rotate: {
-    MELCHIOR:  { provider: "anthropic", model: "claude-sonnet-4-20250514" },
-    BALTHASAR: { provider: "google",    model: "gemini-2.5-flash" },
+    MELCHIOR:  { provider: "anthropic", model: "claude-sonnet-4-6" },
+    BALTHASAR: { provider: "google",    model: "gemini-3-flash-preview" },
     CASPER:    { provider: "openai",    model: "gpt-5" },
   },
   rotate2: {
-    MELCHIOR:  { provider: "google",    model: "gemini-2.5-flash" },
+    MELCHIOR:  { provider: "google",    model: "gemini-3-flash-preview" },
     BALTHASAR: { provider: "openai",    model: "gpt-5" },
-    CASPER:    { provider: "anthropic", model: "claude-sonnet-4-20250514" },
+    CASPER:    { provider: "anthropic", model: "claude-sonnet-4-6" },
   },
 };
 
