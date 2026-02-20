@@ -2,7 +2,7 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { deliberate } from "./orchestrator.js";
-import { AGENT_PROVIDERS } from "./llm/client.js";
+import { AGENT_PROVIDERS, setPreset, PRESETS } from "./llm/client.js";
 import type { ConsensusResult, RoundResult } from "./agents/types.js";
 
 function renderRound(round: RoundResult, verbose: boolean) {
@@ -79,7 +79,9 @@ program
   .option("-v, --verbose", "Show full reasoning from each agent")
   .option("-m, --model <model>", "Use single model for all agents (overrides multi-provider)")
   .option("-1, --single-round", "Skip deliberation, single round only")
-  .action(async (question: string, opts: { verbose?: boolean; model?: string; singleRound?: boolean }) => {
+  .option("-p, --preset <name>", "Provider preset (default, rotate, rotate2)")
+  .action(async (question: string, opts: { verbose?: boolean; model?: string; singleRound?: boolean; preset?: string }) => {
+    if (opts.preset) setPreset(opts.preset);
     const rounds = opts.singleRound ? 1 : 3;
     const multiProvider = !opts.model;
     const modelLabel = multiProvider

@@ -15,11 +15,33 @@ interface ProviderConfig {
 }
 
 // Default provider mapping per agent
-const AGENT_PROVIDERS: Record<string, ProviderConfig> = {
-  MELCHIOR:  { provider: "openai",    model: "gpt-5" },
-  BALTHASAR: { provider: "anthropic", model: "claude-sonnet-4-20250514" },
-  CASPER:    { provider: "google",    model: "gemini-2.5-flash" },
+// Rotation presets
+const PRESETS: Record<string, Record<string, ProviderConfig>> = {
+  default: {
+    MELCHIOR:  { provider: "openai",    model: "gpt-5" },
+    BALTHASAR: { provider: "anthropic", model: "claude-sonnet-4-20250514" },
+    CASPER:    { provider: "google",    model: "gemini-2.5-flash" },
+  },
+  rotate: {
+    MELCHIOR:  { provider: "anthropic", model: "claude-sonnet-4-20250514" },
+    BALTHASAR: { provider: "google",    model: "gemini-2.5-flash" },
+    CASPER:    { provider: "openai",    model: "gpt-5" },
+  },
+  rotate2: {
+    MELCHIOR:  { provider: "google",    model: "gemini-2.5-flash" },
+    BALTHASAR: { provider: "openai",    model: "gpt-5" },
+    CASPER:    { provider: "anthropic", model: "claude-sonnet-4-20250514" },
+  },
 };
+
+let AGENT_PROVIDERS: Record<string, ProviderConfig> = PRESETS.default;
+
+export function setPreset(name: string) {
+  if (!PRESETS[name]) throw new Error(`Unknown preset: ${name}. Available: ${Object.keys(PRESETS).join(", ")}`);
+  AGENT_PROVIDERS = PRESETS[name];
+}
+
+export { PRESETS };
 
 // ── OpenAI ──
 async function callOpenAI(system: string, prompt: string, model: string): Promise<{ content: string; usage: any }> {
