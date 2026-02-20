@@ -1,7 +1,9 @@
-import type { Agent, AgentResponse, ConsensusResult, Vote } from "./agents/types.js";
+import type { Agent, AgentResponse, ConsensusResult, RoundResult, TokenUsage, Vote } from "./agents/types.js";
 
 export function resolveConsensus(
-  votes: { agent: Agent; response: AgentResponse }[]
+  votes: { agent: Agent; response: AgentResponse }[],
+  rounds: RoundResult[],
+  usage: TokenUsage
 ): ConsensusResult {
   const counts: Record<Vote, number> = { approve: 0, reject: 0, abstain: 0 };
   for (const v of votes) counts[v.response.vote]++;
@@ -27,6 +29,8 @@ export function resolveConsensus(
   return {
     verdict,
     votes,
+    rounds,
     summary: `${verdictLabel} (${summaryParts.join(" / ")})`,
+    usage,
   };
 }

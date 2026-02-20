@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import type { Agent, AgentResponse } from "../agents/types.js";
+import type { Agent, AgentResponse, TokenUsage } from "../agents/types.js";
 
 let _openai: OpenAI | null = null;
 function getClient(): OpenAI {
@@ -7,20 +7,43 @@ function getClient(): OpenAI {
   return _openai;
 }
 
+// Global token tracker
+const _usage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0 };
+
+export function getUsage(): TokenUsage {
+  return { ..._usage };
+}
+
+export function resetUsage(): void {
+  _usage.promptTokens = 0;
+  _usage.completionTokens = 0;
+  _usage.totalTokens = 0;
+  _usage.calls = 0;
+}
+
 export async function queryAgent(
   agent: Agent,
-  question: string,
-  model: string = "gpt-4o-mini"
+  prompt: string,
+  model: string = "gpt-4o-mini",
+  systemOverride?: string
 ): Promise<AgentResponse> {
   const response = await getClient().chat.completions.create({
     model,
     messages: [
-      { role: "system", content: agent.systemPrompt },
-      { role: "user", content: question },
+      { role: "system", content: systemOverride ?? agent.systemPrompt },
+      { role: "user", content: prompt },
     ],
     temperature: 0.7,
     max_tokens: 500,
   });
+
+  // Track tokens
+  if (response.usage) {
+    _usage.promptTokens += response.usage.prompt_tokens;
+    _usage.completionTokens += response.usage.completion_tokens;
+    _usage.totalTokens += response.usage.total_tokens;
+  }
+  _usage.calls++;
 
   const content = response.choices[0]?.message?.content?.trim();
   if (!content) throw new Error(`${agent.name} returned empty response`);
