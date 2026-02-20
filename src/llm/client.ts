@@ -1,24 +1,11 @@
-import OpenAI from "openai";
 import type { Agent, AgentResponse, TokenUsage } from "../agents/types.js";
-
-let _openai: OpenAI | null = null;
-function getClient(): OpenAI {
-  if (!_openai) _openai = new OpenAI();
-  return _openai;
-}
 
 // Global token tracker
 const _usage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0 };
 
-export function getUsage(): TokenUsage {
-  return { ..._usage };
-}
-
+export function getUsage(): TokenUsage { return { ..._usage }; }
 export function resetUsage(): void {
-  _usage.promptTokens = 0;
-  _usage.completionTokens = 0;
-  _usage.totalTokens = 0;
-  _usage.calls = 0;
+  _usage.promptTokens = 0; _usage.completionTokens = 0; _usage.totalTokens = 0; _usage.calls = 0;
 }
 
 export async function queryAgent(
@@ -27,25 +14,53 @@ export async function queryAgent(
   model: string = "gpt-4o-mini",
   systemOverride?: string
 ): Promise<AgentResponse> {
-  const response = await getClient().chat.completions.create({
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("Missing OPENAI_API_KEY environment variable");
+
+  const body: any = {
     model,
     messages: [
       { role: "system", content: systemOverride ?? agent.systemPrompt },
       { role: "user", content: prompt },
     ],
-    temperature: 0.7,
-    max_tokens: 500,
+  };
+
+  // gpt-5+ doesn't support custom temperature
+  if (!model.startsWith("gpt-5")) {
+    body.temperature = 0.7;
+  }
+
+  if (model.startsWith("gpt-5")) {
+    body.max_completion_tokens = 4096;
+  } else {
+    body.max_tokens = 500;
+  }
+
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
   });
 
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`${res.status} ${(err as any)?.error?.message ?? res.statusText}`);
+  }
+
+  const data = await res.json() as any;
+
   // Track tokens
-  if (response.usage) {
-    _usage.promptTokens += response.usage.prompt_tokens;
-    _usage.completionTokens += response.usage.completion_tokens;
-    _usage.totalTokens += response.usage.total_tokens;
+  if (data.usage) {
+    _usage.promptTokens += data.usage.prompt_tokens;
+    _usage.completionTokens += data.usage.completion_tokens;
+    _usage.totalTokens += data.usage.total_tokens;
   }
   _usage.calls++;
 
-  const content = response.choices[0]?.message?.content?.trim();
+  const content = data.choices?.[0]?.message?.content?.trim();
   if (!content) throw new Error(`${agent.name} returned empty response`);
 
   try {
