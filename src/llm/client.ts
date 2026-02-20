@@ -75,12 +75,26 @@ async function callOpenAI(system: string, prompt: string, model: string): Promis
   return { content: data.choices?.[0]?.message?.content?.trim() ?? "", usage: data.usage };
 }
 
+// ── Retry helper ──
+async function withRetry<T>(fn: () => Promise<T>, retries = 3, delayMs = 3000): Promise<T> {
+  for (let i = 0; i < retries; i++) {
+    try { return await fn(); } catch (e: any) {
+      if (i < retries - 1 && (e.message?.includes("529") || e.message?.includes("Overloaded") || e.message?.includes("500"))) {
+        await new Promise(r => setTimeout(r, delayMs * (i + 1)));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error("Unreachable");
+}
+
 // ── Anthropic (Claude) ──
 async function callAnthropic(system: string, prompt: string, model: string): Promise<{ content: string; usage: any }> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("Missing ANTHROPIC_API_KEY");
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await withRetry(() => fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "x-api-key": apiKey,
@@ -93,7 +107,7 @@ async function callAnthropic(system: string, prompt: string, model: string): Pro
       system,
       messages: [{ role: "user", content: prompt }],
     }),
-  });
+  }));
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as any;
     throw new Error(`Anthropic ${res.status}: ${err?.error?.message ?? res.statusText}`);
@@ -118,7 +132,20 @@ async function callGoogle(system: string, prompt: string, model: string): Promis
     body: JSON.stringify({
       system_instruction: { parts: [{ text: system }] },
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.7, maxOutputTokens: 1024, responseMimeType: "application/json" },
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 2048,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            vote: { type: "string", enum: ["approve", "reject", "abstain"] },
+            reasoning: { type: "string" },
+            summary: { type: "string" },
+          },
+          required: ["vote", "reasoning", "summary"],
+        },
+      },
     }),
   });
   if (!res.ok) {
