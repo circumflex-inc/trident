@@ -2,66 +2,160 @@ import type { Agent, AgentResponse, TokenUsage } from "../agents/types.js";
 
 // Global token tracker
 const _usage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0 };
-
 export function getUsage(): TokenUsage { return { ..._usage }; }
 export function resetUsage(): void {
   _usage.promptTokens = 0; _usage.completionTokens = 0; _usage.totalTokens = 0; _usage.calls = 0;
 }
 
-export async function queryAgent(
-  agent: Agent,
-  prompt: string,
-  model: string = "gpt-4o-mini",
-  systemOverride?: string
-): Promise<AgentResponse> {
+type Provider = "openai" | "anthropic" | "google";
+
+interface ProviderConfig {
+  provider: Provider;
+  model: string;
+}
+
+// Default provider mapping per agent
+const AGENT_PROVIDERS: Record<string, ProviderConfig> = {
+  MELCHIOR:  { provider: "openai",    model: "gpt-5" },
+  BALTHASAR: { provider: "anthropic", model: "claude-sonnet-4-20250514" },
+  CASPER:    { provider: "google",    model: "gemini-2.5-flash" },
+};
+
+// ── OpenAI ──
+async function callOpenAI(system: string, prompt: string, model: string): Promise<{ content: string; usage: any }> {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("Missing OPENAI_API_KEY environment variable");
+  if (!apiKey) throw new Error("Missing OPENAI_API_KEY");
 
   const body: any = {
     model,
     messages: [
-      { role: "system", content: systemOverride ?? agent.systemPrompt },
+      { role: "system", content: system },
       { role: "user", content: prompt },
     ],
   };
-
-  // gpt-5+ doesn't support custom temperature
-  if (!model.startsWith("gpt-5")) {
-    body.temperature = 0.7;
-  }
-
   if (model.startsWith("gpt-5")) {
     body.max_completion_tokens = 4096;
   } else {
+    body.temperature = 0.7;
     body.max_tokens = 500;
   }
 
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
+    headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`${res.status} ${(err as any)?.error?.message ?? res.statusText}`);
+    const err = await res.json().catch(() => ({})) as any;
+    throw new Error(`OpenAI ${res.status}: ${err?.error?.message ?? res.statusText}`);
+  }
+  const data = await res.json() as any;
+  return { content: data.choices?.[0]?.message?.content?.trim() ?? "", usage: data.usage };
+}
+
+// ── Anthropic (Claude) ──
+async function callAnthropic(system: string, prompt: string, model: string): Promise<{ content: string; usage: any }> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error("Missing ANTHROPIC_API_KEY");
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 1024,
+      system,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as any;
+    throw new Error(`Anthropic ${res.status}: ${err?.error?.message ?? res.statusText}`);
+  }
+  const data = await res.json() as any;
+  const content = data.content?.map((c: any) => c.text).join("") ?? "";
+  return {
+    content: content.trim(),
+    usage: { prompt_tokens: data.usage?.input_tokens ?? 0, completion_tokens: data.usage?.output_tokens ?? 0, total_tokens: (data.usage?.input_tokens ?? 0) + (data.usage?.output_tokens ?? 0) },
+  };
+}
+
+// ── Google (Gemini) ──
+async function callGoogle(system: string, prompt: string, model: string): Promise<{ content: string; usage: any }> {
+  const apiKey = process.env.GOOGLE_API_KEY;
+  if (!apiKey) throw new Error("Missing GOOGLE_API_KEY");
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: system }] },
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.7, maxOutputTokens: 1024, responseMimeType: "application/json" },
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as any;
+    throw new Error(`Google ${res.status}: ${err?.error?.message ?? res.statusText}`);
+  }
+  const data = await res.json() as any;
+  const content = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join("") ?? "";
+  const meta = data.usageMetadata ?? {};
+  return {
+    content: content.trim(),
+    usage: { prompt_tokens: meta.promptTokenCount ?? 0, completion_tokens: meta.candidatesTokenCount ?? 0, total_tokens: meta.totalTokenCount ?? 0 },
+  };
+}
+
+// ── Unified call ──
+async function callProvider(provider: Provider, system: string, prompt: string, model: string) {
+  switch (provider) {
+    case "openai": return callOpenAI(system, prompt, model);
+    case "anthropic": return callAnthropic(system, prompt, model);
+    case "google": return callGoogle(system, prompt, model);
+  }
+}
+
+export interface QueryOptions {
+  model?: string;          // Override model for all agents (single-provider mode)
+  multiProvider?: boolean; // Use agent-specific providers (default: true if no model specified)
+}
+
+export async function queryAgent(
+  agent: Agent,
+  prompt: string,
+  opts: QueryOptions = {},
+): Promise<AgentResponse> {
+  const useMulti = opts.multiProvider ?? !opts.model;
+  let provider: Provider;
+  let model: string;
+
+  if (useMulti && AGENT_PROVIDERS[agent.name]) {
+    const cfg = AGENT_PROVIDERS[agent.name];
+    provider = cfg.provider;
+    model = cfg.model;
+  } else {
+    provider = "openai";
+    model = opts.model ?? "gpt-4o-mini";
   }
 
-  const data = await res.json() as any;
+  const system = agent.systemPrompt;
+  const { content, usage } = await callProvider(provider, system, prompt, model);
 
   // Track tokens
-  if (data.usage) {
-    _usage.promptTokens += data.usage.prompt_tokens;
-    _usage.completionTokens += data.usage.completion_tokens;
-    _usage.totalTokens += data.usage.total_tokens;
+  if (usage) {
+    _usage.promptTokens += usage.prompt_tokens ?? 0;
+    _usage.completionTokens += usage.completion_tokens ?? 0;
+    _usage.totalTokens += usage.total_tokens ?? 0;
   }
   _usage.calls++;
 
-  const content = data.choices?.[0]?.message?.content?.trim();
-  if (!content) throw new Error(`${agent.name} returned empty response`);
+  if (!content) throw new Error(`${agent.name} (${provider}/${model}) returned empty response`);
 
   try {
     const cleaned = content.replace(/^```json?\n?/i, "").replace(/\n?```$/i, "").trim();
@@ -73,8 +167,11 @@ export async function queryAgent(
   } catch (e) {
     return {
       vote: "abstain",
-      reasoning: `[Parse error] Raw response: ${content.slice(0, 200)}`,
+      reasoning: `[Parse error from ${provider}/${model}] Raw: ${content.slice(0, 200)}`,
       summary: "Failed to parse structured response",
     };
   }
 }
+
+export { AGENT_PROVIDERS };
+export type { Provider, ProviderConfig };
