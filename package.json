@@ -1,0 +1,28 @@
+{
+  "name": "trident",
+  "version": "1.0.0",
+  "description": "**AI合議システム** - 複数の自律AIエージェントによる多数決意思決定フレームワーク",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/circumflex-inc/trident.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/circumflex-inc/trident/issues"
+  },
+  "homepage": "https://github.com/circumflex-inc/trident#readme",
+  "dependencies": {
+    "chalk": "^5.6.2",
+    "commander": "^14.0.3",
+    "openai": "^6.22.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
